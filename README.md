@@ -2,6 +2,15 @@
 
 An MCP server that gives Claude Desktop and Claude Code access to your Microsoft 365 email (Outlook) and calendar via Microsoft Graph API.
 
+## Quick Start Overview
+
+Setting up this MCP server requires two main steps:
+
+1. **Azure AD Setup** (5-10 minutes, one-time): Create an app registration in Azure to get your credentials
+2. **Local Installation** (5 minutes): Install the server and configure Claude Desktop or Claude Code
+
+Both are detailed below with step-by-step instructions.
+
 ## Tools Included
 
 | Tool | Description |
@@ -20,15 +29,81 @@ An MCP server that gives Claude Desktop and Claude Code access to your Microsoft
 
 ---
 
-## Setup Instructions
+## Azure AD Setup (Required First)
+
+Before you can use this MCP server, you need to create an Azure AD App Registration to get your `MS_CLIENT_ID` and `MS_TENANT_ID`. This only needs to be done once.
+
+### Step 1: Create the App Registration
+
+1. **Go to the Azure Portal**
+   - Navigate to [portal.azure.com](https://portal.azure.com)
+   - Sign in with your Microsoft 365 account
+
+2. **Access App Registrations**
+   - In the top search bar, type "App registrations"
+   - Click on **App registrations** from the search results
+
+3. **Create New Registration**
+   - Click **"+ New registration"** button at the top
+   - Fill in the registration form:
+     - **Name**: `MS365 MCP Server` (or any name you prefer)
+     - **Supported account types**: Select **"Accounts in this organizational directory only (Single tenant)"**
+     - **Redirect URI**:
+       - Select **"Mobile and desktop applications"** from the dropdown
+       - Enter: `http://localhost`
+   - Click **"Register"** button
+
+4. **Copy Your Credentials**
+   - You'll be taken to the app's Overview page
+   - Copy and save these two values (you'll need them later):
+     - **Application (client) ID** → This is your `MS_CLIENT_ID`
+     - **Directory (tenant) ID** → This is your `MS_TENANT_ID`
+   - Keep these values handy — you'll use them in the setup steps below
+
+### Step 2: Set API Permissions
+
+1. **Navigate to API Permissions**
+   - In the left sidebar, click **"API permissions"**
+
+2. **Add Microsoft Graph Permissions**
+   - Click **"+ Add a permission"**
+   - Select **"Microsoft Graph"**
+   - Select **"Delegated permissions"**
+
+3. **Add Required Permissions**
+   - Search for and add each of these permissions:
+     - ✅ **Mail.Read** - Read your emails
+     - ✅ **Mail.Send** - Send emails from your account
+     - ✅ **Calendars.Read** - Read your calendar
+     - ✅ **User.Read** - Read basic profile information
+   - Click **"Add permissions"** when done
+
+4. **Grant Admin Consent**
+   - Back on the API permissions page, look for the **"Grant admin consent for [Your Organization]"** button
+   - **If you're an admin**: Click the button and confirm
+   - **If you're not an admin**: Ask your IT administrator to grant consent
+   - You should see green checkmarks under the "Status" column for all permissions
+
+### Step 3: Verify Your Setup
+
+Your Azure configuration is complete when you have:
+- ✅ Application (client) ID copied
+- ✅ Directory (tenant) ID copied
+- ✅ All four permissions added and granted (green checkmarks)
+
+Now you're ready to proceed with the local installation!
+
+---
+
+## Local Installation
 
 ### Prerequisites
 
 - Python 3.10+
-- Claude Desktop app installed
-- An Azure AD App Registration (you already have this — your `MS_CLIENT_ID` and `MS_TENANT_ID`)
+- Claude Desktop or Claude Code CLI installed
+- **MS_CLIENT_ID** and **MS_TENANT_ID** from Azure setup above
 
-### Step 1: Clone/Copy the Project
+### Step 1: Clone or Download the Project
 
 Copy the `ms365-mcp-server` folder to a permanent location on your machine:
 
@@ -71,6 +146,8 @@ Press `Ctrl+C` to stop the server after the login succeeds.
 ### Step 4: Configure Claude Desktop
 
 Open Claude Desktop's configuration file:
+
+**IMPORTANT**: Use the `MS_CLIENT_ID` and `MS_TENANT_ID` you copied from the Azure setup above.
 
 - **macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
 - **Windows**: `%APPDATA%\Claude\claude_desktop_config.json`
@@ -129,6 +206,8 @@ Follow Steps 1-3 from the Claude Desktop setup above (clone, create venv, first-
 ### Step 4: Configure Claude Code MCP Settings
 
 Open or create the Claude Code MCP configuration file:
+
+**IMPORTANT**: Use the `MS_CLIENT_ID` and `MS_TENANT_ID` you copied from the Azure setup above.
 - **macOS/Linux**: `~/.claude/mcp_settings.json`
 - **Windows**: `%USERPROFILE%\.claude\mcp_settings.json`
 
