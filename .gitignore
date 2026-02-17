@@ -13,6 +13,7 @@ __pycache__/
 
 # Sensitive files - DO NOT COMMIT
 token_cache.json
+.env.local
 
 # IDE
 .vscode/
