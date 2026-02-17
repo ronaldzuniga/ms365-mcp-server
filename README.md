@@ -19,6 +19,7 @@ Both are detailed below with step-by-step instructions.
 | `ms365_read_email` | Read full email content by ID |
 | `ms365_search_emails` | Search emails by keyword |
 | `ms365_send_email` | Send an email |
+| `ms365_create_draft` | Create a draft email without sending |
 | `ms365_reply_email` | Reply to an email |
 | `ms365_list_mail_folders` | List all mail folders with counts |
 | `ms365_list_events` | List calendar events in a date range |
@@ -73,6 +74,7 @@ Before you can use this MCP server, you need to create an Azure AD App Registrat
 3. **Add Required Permissions**
    - Search for and add each of these permissions:
      - ✅ **Mail.Read** - Read your emails
+     - ✅ **Mail.ReadWrite** - Create and manage email drafts
      - ✅ **Mail.Send** - Send emails from your account
      - ✅ **Calendars.Read** - Read your calendar
      - ✅ **User.Read** - Read basic profile information
@@ -89,7 +91,7 @@ Before you can use this MCP server, you need to create an Azure AD App Registrat
 Your Azure configuration is complete when you have:
 - ✅ Application (client) ID copied
 - ✅ Directory (tenant) ID copied
-- ✅ All four permissions added and granted (green checkmarks)
+- ✅ All five permissions added and granted (green checkmarks)
 
 Now you're ready to proceed with the local installation!
 
@@ -268,7 +270,7 @@ Delete `token_cache.json` and run `python server.py` again to re-authenticate.
 4. Check Claude Desktop logs for errors
 
 ### Permission errors from Microsoft Graph
-Go back to your Azure AD App Registration → API Permissions and make sure `Mail.Read`, `Mail.Send`, `Calendars.Read`, and `User.Read` are all granted with admin consent.
+Go back to your Azure AD App Registration → API Permissions and make sure `Mail.Read`, `Mail.ReadWrite`, `Mail.Send`, `Calendars.Read`, and `User.Read` are all granted with admin consent.
 
 ### Token cache location
 The `token_cache.json` is saved in the same directory as `server.py`. Make sure the process has write access to that folder.

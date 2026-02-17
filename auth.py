@@ -12,6 +12,7 @@ TOKEN_CACHE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tok
 
 SCOPES = [
     "Mail.Read",
+    "Mail.ReadWrite",
     "Mail.Send",
     "Calendars.Read",
     "User.Read",

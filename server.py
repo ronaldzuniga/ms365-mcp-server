@@ -7,12 +7,16 @@ import os
 import sys
 from typing import Optional, List
 
+from dotenv import load_dotenv
 from mcp.server.fastmcp import FastMCP
 
 import auth
 import graph_client
 
 # ── Configuration ────────────────────────────────────────────────
+
+load_dotenv(".env.local")
+load_dotenv()  # fallback to .env
 
 MS_CLIENT_ID = os.environ.get("MS_CLIENT_ID")
 MS_TENANT_ID = os.environ.get("MS_TENANT_ID")
@@ -255,6 +259,55 @@ async def ms365_send_email(
         )
         to_str = ", ".join(to)
         return f"Email sent successfully to {to_str} with subject '{subject}'."
+    except Exception as e:
+        return _handle_error(e)
+
+
+@mcp.tool(
+    name="ms365_create_draft",
+    annotations={"readOnlyHint": False, "destructiveHint": False, "idempotentHint": False, "openWorldHint": True},
+)
+async def ms365_create_draft(
+    to: List[str],
+    subject: str,
+    body: str,
+    cc: Optional[List[str]] = None,
+    html: bool = False,
+) -> str:
+    """Create a draft email in the Drafts folder without sending it.
+
+    Args:
+        to: List of recipient email addresses.
+        subject: Email subject line.
+        body: Email body content.
+        cc: Optional CC recipients.
+        html: If true, body is treated as HTML (default: false).
+
+    Returns:
+        Confirmation with draft ID for reference.
+    """
+    token = _get_token()
+    try:
+        if not to or len(to) == 0:
+            return "Error: At least one recipient is required in 'to' field."
+        if not subject or not subject.strip():
+            return "Error: 'subject' is required."
+
+        draft = await graph_client.create_draft(
+            token,
+            to_recipients=to,
+            subject=subject,
+            body=body,
+            cc_recipients=cc,
+            is_html=html,
+        )
+        to_str = ", ".join(to)
+        return (
+            f"Draft created successfully.\n"
+            f"**To:** {to_str}\n"
+            f"**Subject:** {subject}\n"
+            f"**Draft ID:** `{draft['id']}`"
+        )
     except Exception as e:
         return _handle_error(e)
 

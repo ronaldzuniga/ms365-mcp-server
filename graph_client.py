@@ -109,6 +109,30 @@ async def send_message(
     return await graph_request(access_token, "POST", "/me/sendMail", json_body=message)
 
 
+async def create_draft(
+    access_token: str,
+    to_recipients: list[str],
+    subject: str,
+    body: str,
+    cc_recipients: Optional[list[str]] = None,
+    is_html: bool = False,
+) -> dict:
+    """Create a draft email in the Drafts folder."""
+    message = {
+        "subject": subject,
+        "body": {
+            "contentType": "HTML" if is_html else "Text",
+            "content": body,
+        },
+        "toRecipients": [{"emailAddress": {"address": addr}} for addr in to_recipients],
+    }
+    if cc_recipients:
+        message["ccRecipients"] = [
+            {"emailAddress": {"address": addr}} for addr in cc_recipients
+        ]
+    return await graph_request(access_token, "POST", "/me/messages", json_body=message)
+
+
 async def reply_to_message(
     access_token: str,
     message_id: str,
