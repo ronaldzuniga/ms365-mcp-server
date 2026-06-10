@@ -7,6 +7,7 @@ import os
 import sys
 from typing import Optional, List
 
+import httpx
 from dotenv import load_dotenv
 from mcp.server.fastmcp import FastMCP
 
@@ -27,17 +28,34 @@ if not MS_CLIENT_ID or not MS_TENANT_ID:
     sys.exit(1)
 
 
-# ── Global token storage ──────────────────────────────────────────
-
-_access_token: Optional[str] = None
+# ── Token acquisition ─────────────────────────────────────────────
 
 
-def _get_token() -> str:
-    """Get or refresh the access token."""
-    global _access_token
-    if not _access_token:
-        _access_token = auth.get_access_token(MS_CLIENT_ID, MS_TENANT_ID)
-    return _access_token
+def _get_token(force_refresh: bool = False, allow_interactive: bool = False) -> str:
+    """Get a valid access token. MSAL serves it from cache while valid and
+    silently refreshes it via the cached refresh token when it expires."""
+    return auth.get_access_token(
+        MS_CLIENT_ID,
+        MS_TENANT_ID,
+        force_refresh=force_refresh,
+        allow_interactive=allow_interactive,
+    )
+
+
+async def _call_graph(func, *args, **kwargs):
+    """Call a graph_client function with a fresh token.
+
+    If Graph still rejects the token (401), force a refresh-token exchange
+    and retry once, so an expired session recovers without a server restart.
+    """
+    token = _get_token()
+    try:
+        return await func(token, *args, **kwargs)
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code == 401:
+            token = _get_token(force_refresh=True)
+            return await func(token, *args, **kwargs)
+        raise
 
 
 mcp = FastMCP("ms365_mcp")
@@ -45,11 +63,13 @@ mcp = FastMCP("ms365_mcp")
 
 def _handle_error(e: Exception) -> str:
     """Consistent error formatting."""
-    import httpx as _httpx
-    if isinstance(e, _httpx.HTTPStatusError):
+    if isinstance(e, httpx.HTTPStatusError):
         status = e.response.status_code
         if status == 401:
-            return "Error: Authentication expired. Please restart the MCP server to re-authenticate."
+            return (
+                "Error: Authentication expired and silent refresh failed. "
+                "Run 'python server.py' once to sign in again (or delete token_cache.json first)."
+            )
         if status == 403:
             return "Error: Permission denied. Check the app's API permissions in Azure AD."
         if status == 404:
@@ -86,7 +106,6 @@ async def ms365_list_emails(
     Returns:
         Markdown-formatted list of emails with key metadata.
     """
-    token = _get_token()
     try:
         # Validate parameters
         if top < 1 or top > 50:
@@ -95,8 +114,8 @@ async def ms365_list_emails(
             return "Error: 'skip' must be >= 0."
 
         filter_q = "isRead eq false" if unread_only else None
-        data = await graph_client.list_messages(
-            token, top=top, skip=skip, filter_query=filter_q, folder=folder
+        data = await _call_graph(
+            graph_client.list_messages, top=top, skip=skip, filter_query=filter_q, folder=folder
         )
         messages = data.get("value", [])
         if not messages:
@@ -137,11 +156,10 @@ async def ms365_read_email(message_id: str) -> str:
     Returns:
         Full email with headers and body content.
     """
-    token = _get_token()
     try:
         if not message_id or not message_id.strip():
             return "Error: message_id is required."
-        msg = await graph_client.get_message(token, message_id)
+        msg = await _call_graph(graph_client.get_message, message_id)
         sender = msg.get("from", {}).get("emailAddress", {})
         to_list = ", ".join(
             f"{r['emailAddress'].get('name', '')} <{r['emailAddress']['address']}>"
@@ -193,13 +211,12 @@ async def ms365_search_emails(query: str, top: int = 10) -> str:
     Returns:
         Markdown-formatted list of matching emails.
     """
-    token = _get_token()
     try:
         if not query or not query.strip():
             return "Error: query is required."
         if top < 1 or top > 25:
             return "Error: 'top' must be between 1 and 25."
-        data = await graph_client.search_messages(token, query, top=top)
+        data = await _call_graph(graph_client.search_messages, query, top=top)
         messages = data.get("value", [])
         if not messages:
             return f"No emails found matching '{query}'."
@@ -242,15 +259,14 @@ async def ms365_send_email(
     Returns:
         Confirmation message.
     """
-    token = _get_token()
     try:
         if not to or len(to) == 0:
             return "Error: At least one recipient is required in 'to' field."
         if not subject or not subject.strip():
             return "Error: 'subject' is required."
 
-        await graph_client.send_message(
-            token,
+        await _call_graph(
+            graph_client.send_message,
             to_recipients=to,
             subject=subject,
             body=body,
@@ -286,15 +302,14 @@ async def ms365_create_draft(
     Returns:
         Confirmation with draft ID for reference.
     """
-    token = _get_token()
     try:
         if not to or len(to) == 0:
             return "Error: At least one recipient is required in 'to' field."
         if not subject or not subject.strip():
             return "Error: 'subject' is required."
 
-        draft = await graph_client.create_draft(
-            token,
+        draft = await _call_graph(
+            graph_client.create_draft,
             to_recipients=to,
             subject=subject,
             body=body,
@@ -326,13 +341,12 @@ async def ms365_reply_email(message_id: str, comment: str) -> str:
     Returns:
         Confirmation message.
     """
-    token = _get_token()
     try:
         if not message_id or not message_id.strip():
             return "Error: message_id is required."
         if not comment or not comment.strip():
             return "Error: comment is required."
-        await graph_client.reply_to_message(token, message_id, comment)
+        await _call_graph(graph_client.reply_to_message, message_id, comment)
         return "Reply sent successfully."
     except Exception as e:
         return _handle_error(e)
@@ -348,9 +362,8 @@ async def ms365_list_mail_folders() -> str:
     Returns:
         Markdown-formatted list of folders.
     """
-    token = _get_token()
     try:
-        data = await graph_client.list_mail_folders(token)
+        data = await _call_graph(graph_client.list_mail_folders)
         folders = data.get("value", [])
         if not folders:
             return "No mail folders found."
@@ -392,7 +405,6 @@ async def ms365_list_events(
     Returns:
         Markdown-formatted list of events.
     """
-    token = _get_token()
     try:
         if not start_datetime or not start_datetime.strip():
             return "Error: start_datetime is required."
@@ -401,8 +413,8 @@ async def ms365_list_events(
         if top < 1 or top > 50:
             return "Error: 'top' must be between 1 and 50."
 
-        data = await graph_client.list_events(
-            token,
+        data = await _call_graph(
+            graph_client.list_events,
             start_datetime=start_datetime,
             end_datetime=end_datetime,
             top=top,
@@ -452,11 +464,10 @@ async def ms365_get_event(event_id: str) -> str:
     Returns:
         Full event details including body and attendees.
     """
-    token = _get_token()
     try:
         if not event_id or not event_id.strip():
             return "Error: event_id is required."
-        ev = await graph_client.get_event(token, event_id)
+        ev = await _call_graph(graph_client.get_event, event_id)
         organizer = ev.get("organizer", {}).get("emailAddress", {})
         start = ev.get("start", {})
         end = ev.get("end", {})
@@ -499,9 +510,8 @@ async def ms365_list_calendars() -> str:
     Returns:
         Markdown-formatted list of calendars.
     """
-    token = _get_token()
     try:
-        data = await graph_client.list_calendars(token)
+        data = await _call_graph(graph_client.list_calendars)
         calendars = data.get("value", [])
         if not calendars:
             return "No calendars found."
@@ -537,7 +547,6 @@ async def ms365_find_free_time(
     Returns:
         Availability view for each person (0=free, 1=tentative, 2=busy, 3=out of office, 4=working elsewhere).
     """
-    token = _get_token()
     try:
         if not emails or len(emails) == 0:
             return "Error: At least one email address is required."
@@ -546,8 +555,8 @@ async def ms365_find_free_time(
         if not end_datetime or not end_datetime.strip():
             return "Error: end_datetime is required."
 
-        data = await graph_client.find_free_busy(
-            token,
+        data = await _call_graph(
+            graph_client.find_free_busy,
             schedules=emails,
             start_datetime=start_datetime,
             end_datetime=end_datetime,
@@ -595,9 +604,8 @@ async def ms365_get_profile() -> str:
     Returns:
         User profile info (name, email, job title, etc.).
     """
-    token = _get_token()
     try:
-        me = await graph_client.get_me(token)
+        me = await _call_graph(graph_client.get_me)
         lines = [
             "**Your Microsoft 365 Profile:**\n",
             f"- **Name:** {me.get('displayName', 'N/A')}",
@@ -616,5 +624,7 @@ async def ms365_get_profile() -> str:
 # ═══════════════════════════════════════════════════════════════════
 
 if __name__ == "__main__":
-    _get_token()
+    # Interactive login is allowed at startup (first run / expired refresh
+    # token); after that, tool calls refresh silently via the token cache.
+    _get_token(allow_interactive=True)
     mcp.run()

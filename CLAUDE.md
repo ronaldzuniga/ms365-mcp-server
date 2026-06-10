@@ -13,14 +13,13 @@ The codebase is organized into three main modules:
 1. **server.py** - MCP server using FastMCP framework
    - Defines 10 tools exposed to Claude Desktop (email and calendar operations)
    - Uses Pydantic models for input validation
-   - Implements `app_lifespan` context manager to acquire token once at startup
-   - All tools use `_get_token(ctx)` to access the shared token from lifespan state
+   - All tools call Graph through `_call_graph()`, which acquires a valid token via `_get_token()` before every request (MSAL serves it from cache while valid, silently refreshes when expired) and retries once with a forced refresh on 401
    - Consistent error handling via `_handle_error()` that interprets HTTP status codes
 
 2. **auth.py** - MSAL authentication layer
-   - Uses `msal.PublicClientApplication` (no client secret required)
+   - Uses a single long-lived `msal.PublicClientApplication` (no client secret required)
    - Caches tokens in `token_cache.json` (auto-created, never commit)
-   - `get_access_token()` tries silent refresh first, falls back to interactive browser login
+   - `get_access_token()` tries silent refresh first, falls back to interactive browser login (only when `allow_interactive=True`; tool calls pass `False` so they never hang waiting for a browser)
    - Scopes: `Mail.Read`, `Mail.Send`, `Calendars.Read`, `User.Read`
 
 3. **graph_client.py** - HTTP client for Microsoft Graph API
@@ -74,7 +73,7 @@ Since there are no unit tests, manual testing is done by:
 
 ## Important Constraints
 
-- **Token refresh**: Tokens auto-refresh via MSAL's cached refresh token (valid ~90 days with use)
+- **Token refresh**: Access tokens auto-refresh on every tool call via MSAL's cached refresh token (valid ~90 days with use); no server restart needed when the access token expires
 - **No client secret**: Uses interactive auth flow, not client credentials
 - **Token cache location**: Always saved in same directory as `server.py`
 - **Timeout**: All Graph API requests have a 30-second timeout
@@ -84,10 +83,9 @@ Since there are no unit tests, manual testing is done by:
 ## Microsoft Graph API Patterns
 
 All Graph API operations follow this pattern:
-1. Get token from lifespan state via `_get_token(ctx)`
-2. Call async function in `graph_client.py` with token
-3. Parse JSON response and format as markdown
-4. Catch exceptions and use `_handle_error()` for consistent error messages
+1. Call the async function in `graph_client.py` via `_call_graph()` (which acquires/refreshes the token and retries once on 401)
+2. Parse JSON response and format as markdown
+3. Catch exceptions and use `_handle_error()` for consistent error messages
 
 When adding new tools:
 - Add Pydantic input model with validation
@@ -98,13 +96,12 @@ When adding new tools:
 
 ## Authentication Flow
 
-1. Server starts → `app_lifespan` is invoked
-2. Calls `auth.get_access_token()`
-3. MSAL checks `token_cache.json` for cached account
-4. If cached token exists → silently refreshes
-5. If no cache → opens browser for interactive login
-6. Token stored in lifespan state, shared across all tool invocations
-7. On 401 errors → user must restart server to re-authenticate
+1. Server starts → `_get_token(allow_interactive=True)` is called once
+2. MSAL checks `token_cache.json` for a cached account
+3. If cached token exists → silently refreshes; if no cache → opens browser for interactive login
+4. Every tool call re-acquires the token via `_call_graph()` → MSAL returns the cached access token while valid and silently exchanges the refresh token when it expires (~1 hour), so long-running sessions keep working without restarting Claude Desktop
+5. If Graph still returns 401 → one retry with `force_refresh=True`
+6. Only if the refresh token itself is dead (~90 days unused or revoked) does the user need to run `python server.py` to sign in again
 
 ## Troubleshooting
 
